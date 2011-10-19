@@ -296,6 +296,7 @@ begin
       FPosition:=Lerp(FPosition, FTargetPosition,
                       ClampValue(0.3/Abs(FTargetPosition-FPosition), 0.02, 0.5));
       UpdateCoversPositions;
+      GLSceneViewer.Repaint;
    end;
 end;
 
