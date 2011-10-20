@@ -4,9 +4,9 @@ interface
 
 uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs, GLCrossPlatform, GLMisc, GLScene, GLWin32Viewer, dwsXPlatform,
+  GLCrossPlatform, GLMisc, GLScene, GLWin32Viewer, IOUtils, Types,
   JPeg, GLTexture, GLGraphics, VectorGeometry, GLUtils, GLCadencer,
-  GLMesh, GLColor, ComCtrls, GLObjects, ExtCtrls, StdCtrls;
+  GLMesh, GLColor, ComCtrls, GLObjects, ExtCtrls, StdCtrls, Dialogs;
 
 type
 
@@ -26,15 +26,13 @@ type
       Shift: TShiftState; X, Y: Integer);
     procedure GLCadencer1Progress(Sender: TObject; const deltaTime,
       newTime: Double);
-    procedure TrackBarChange(Sender: TObject);
     procedure BUSelectClick(Sender: TObject);
     procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
   private
     { Private declarations }
-    FTargetPosition, FPosition : Double;
+    FPosition : Single;
     FLoader : TThread;
     procedure LoadFolder(const folder : String);
-    procedure LoaderTerminated;
   public
     { Public declarations }
     procedure UpdateCoversPositions;
@@ -48,21 +46,17 @@ implementation
 {$R *.dfm}
 
 const
-   cTargetWidth = 400;
-   cTargetHeight = 270;
+   cTargetSize = 400;
 
 type
-   TMethod = procedure of object;
-
    TBackgroundLoader = class(TThread)
-      FPics : TStringList;
+      FPics : TStringDynArray;
+      FCurrentIndex : Integer;
       FJPGImage : TJPEGImage;
       FBitmap : TBitmap;
-      FCurrent : Integer;
       FDestination : TGLBaseSceneObject;
       FMaterialLibrary : TGLMaterialLibrary;
-      FOnAfterAddMesh : TMethod;
-      FOnTerminate : TMethod;
+      FOnAfterAddMesh, FOnTerminate : TProc;
       FCurrentWidth, FCurrentHeight : Integer;
 
       constructor Create(const folder : String; destination : TGLBaseSceneObject;
@@ -87,12 +81,10 @@ begin
    FDestination:=destination;
    FMaterialLibrary:=materialLibray;
 
-   FPics:=TStringList.Create;
-   CollectFiles(folder, '*.jpg', FPics);
+   FPics:=TDirectory.GetFiles(folder, '*.jpg');
 
    FJPGImage:=TJPEGImage.Create;
    FJPGImage.Performance:=jpBestSpeed;
-
    FBitmap:=TBitmap.Create;
    FBitmap.Canvas.Brush.Color:=clBlack;
    FBitmap.PixelFormat:=pf32bit;
@@ -100,38 +92,35 @@ end;
 
 destructor TBackgroundLoader.Destroy;
 begin
-   inherited;
-   FPics.Free;
    FJPGImage.Free;
    FBitmap.Free;
+   // own event as we can't use OnTerminated reliably (bug in RTL)
    if Assigned(FOnTerminate) then
       FOnTerminate();
+   inherited;
 end;
 
 procedure TBackgroundLoader.Execute;
 begin
-   while LoadNext do
+   while (not Terminated) and LoadNext do
       Synchronize(AddMesh);
    FreeOnTerminate:=not Terminated;
 end;
 
 function TBackgroundLoader.LoadNext : Boolean;
-var
-   fileName : String;
 begin
-   if Terminated or (FCurrent>=FPics.Count) then
+   if FCurrentIndex>High(FPics) then
       Exit(False);
 
-   fileName:=FPics[FCurrent];
-   Inc(FCurrent);
-
    // Load the JPEG image
-   FJPGImage.LoadFromFile(fileName);
+   FJPGImage.LoadFromFile(FPics[FCurrentIndex]);
+   Inc(FCurrentIndex);
+
    FCurrentWidth:=FJPGImage.Width;
    FCurrentHeight:=FJPGImage.Height;
 
    // Use built-in JPEG ability to downsize large bitmaps to what we need
-   case MaxInteger(FCurrentWidth div cTargetWidth, FCurrentHeight div cTargetHeight) of
+   case MinInteger(FCurrentWidth div cTargetSize, FCurrentHeight div cTargetSize) of
       0..1 :
          FJPGImage.Scale:=jsFullSize;
       2..3 : begin
@@ -150,21 +139,17 @@ begin
       FJPGImage.Scale:=jsEighth;
    end;
 
-   // reserve 1 pixel margin at borders (prettier)
-   Inc(FCurrentWidth, 2);
-   Inc(FCurrentHeight, 2);
-
-   // prepare texture bitmap
-   FBitmap.Height:=RoundUpToPowerOf2(FCurrentHeight);
-   FBitmap.Width:=RoundUpToPowerOf2(FCurrentWidth);
+   // prepare texture bitmap (with 1 pixel margin at borders, prettier)
+   FBitmap.Height:=RoundUpToPowerOf2(FCurrentHeight+2);
+   FBitmap.Width:=RoundUpToPowerOf2(FCurrentWidth+2);
 
    // manual lock necessary to workaround TJPEGImage.Draw() ages-old bug
    FBitmap.Canvas.Lock;
    TJPEGImageCracker(FJPGImage).Bitmap.Canvas.Lock;
    try
       FBitmap.Canvas.FillRect(FBitmap.Canvas.ClipRect);
-      FBitmap.Canvas.StretchDraw(Rect(1, FBitmap.Height-FCurrentHeight,
-                                      FCurrentWidth-1, FBitmap.Height-1),
+      FBitmap.Canvas.StretchDraw(Rect(1, FBitmap.Height-FCurrentHeight-2,
+                                      FCurrentWidth+1, FBitmap.Height-1),
                                  FJPGImage);
    finally
       TJPEGImageCracker(FJPGImage).Bitmap.Canvas.Unlock;
@@ -185,9 +170,9 @@ begin
 
    // prepare material
    material:=FMaterialLibrary.Materials.Add;
-   material.Name:=IntToStr(FCurrent);
-   material.TextureScale.X:=FCurrentWidth/FBitmap.Width;
-   material.TextureScale.Y:=FCurrentHeight/FBitmap.Height;
+   material.Name:=IntToStr(FCurrentIndex);
+   material.TextureScale.X:=(FCurrentWidth+2)/FBitmap.Width;
+   material.TextureScale.Y:=(FCurrentHeight+2)/FBitmap.Height;
 
    texture:=material.Material.Texture;
 
@@ -205,18 +190,18 @@ begin
    mesh:=TGLMesh(FDestination.AddNewChild(TGLMesh));
    mesh.Mode:=mmTriangleStrip;
    mesh.Vertices.Clear;
-   mesh.Vertices.AddVertex(AffineVectorMake( 0.5,  0.5, 0), ZVector, clrWhite, TexPointMake(1, 1));
-   mesh.Vertices.AddVertex(AffineVectorMake(-0.5,  0.5, 0), ZVector, clrWhite, TexPointMake(0, 1));
-   mesh.Vertices.AddVertex(AffineVectorMake( 0.5, -0.16, 0), ZVector, clrWhite, TexPointMake(1, 0));
-   mesh.Vertices.AddVertex(AffineVectorMake(-0.5, -0.16, 0), ZVector, clrWhite, TexPointMake(0, 0));
-   mesh.Vertices.AddVertex(AffineVectorMake(-0.5, -0.16, 0), ZVector, clrWhite, TexPointMake(0, 0)); // degenerate triangle
-   mesh.Vertices.AddVertex(AffineVectorMake(-0.5, -0.16, 0), ZVector, clrGray70, TexPointMake(0, 0));
-   mesh.Vertices.AddVertex(AffineVectorMake( 0.5, -0.16, 0), ZVector, clrGray70, TexPointMake(1, 0));
-   mesh.Vertices.AddVertex(AffineVectorMake(-0.5, -0.6, 0), ZVector, clrTransparent, TexPointMake(0, 0.66));
-   mesh.Vertices.AddVertex(AffineVectorMake( 0.5, -0.6, 0), ZVector, clrTransparent, TexPointMake(1, 0.66));
+   mesh.Vertices.AddVertex(AffineVectorMake( 0.5,  0.5 , 0), ZVector, clrWhite,  XYTexPoint);
+   mesh.Vertices.AddVertex(AffineVectorMake(-0.5,  0.5 , 0), ZVector, clrWhite,  YTexPoint);
+   mesh.Vertices.AddVertex(AffineVectorMake( 0.5, -0.16, 0), ZVector, clrWhite,  XTexPoint);
+   mesh.Vertices.AddVertex(AffineVectorMake(-0.5, -0.16, 0), ZVector, clrWhite,  NullTexPoint);
+   mesh.Vertices.AddVertex(AffineVectorMake(-0.5, -0.16, 0), ZVector, clrWhite,  NullTexPoint); // degenerate triangle
+   mesh.Vertices.AddVertex(AffineVectorMake(-0.5, -0.16, 0), ZVector, clrGray70, NullTexPoint);
+   mesh.Vertices.AddVertex(AffineVectorMake( 0.5, -0.16, 0), ZVector, clrGray70, XTexPoint);
+   mesh.Vertices.AddVertex(AffineVectorMake(-0.5, -0.6 , 0), ZVector, clrTransparent, TexPointMake(0, 0.66));
+   mesh.Vertices.AddVertex(AffineVectorMake( 0.5, -0.6 , 0), ZVector, clrTransparent, TexPointMake(1, 0.66));
    mesh.Material.MaterialLibrary:=FMaterialLibrary;
    mesh.Material.LibMaterialName:=material.Name;
-   mesh.Tag:=FCurrent-1;
+   mesh.Tag:=FCurrentIndex-1;
 
    if Assigned(FOnAfterAddMesh) then
       FOnAfterAddMesh();
@@ -236,6 +221,8 @@ procedure TGLFlowForm.FormCreate(Sender: TObject);
 begin
    // default to samples FPics from the FireMonkey sample
    LoadFolder('C:\Users\Public\Documents\RAD Studio\9.0\Samples\FireMonkey\FireFlow\Demo Photos\');
+   // go for 60 FPS
+   GLCadencer1.FixedDeltaTime:=1/60;
 end;
 
 procedure TGLFlowForm.FormCloseQuery(Sender: TObject; var CanClose: Boolean);
@@ -250,18 +237,16 @@ begin
    loader:=TBackgroundLoader.Create(folder, DCPics, GLMaterialLibrary);
    FLoader:=loader;
    loader.FOnAfterAddMesh:=UpdateCoversPositions;
-   loader.FOnTerminate:=LoaderTerminated;
+   loader.FOnTerminate:=procedure
+                        begin
+                           FLoader:=nil;
+                        end;
 
    TrackBar.Position:=0;
-   TrackBar.Max:=loader.FPics.Count-1;
-   FPosition:=FTargetPosition;
+   TrackBar.Max:=High(loader.FPics);
+   FPosition:=0;
 
    FLoader.Start;
-end;
-
-procedure TGLFlowForm.LoaderTerminated;
-begin
-   FLoader:=nil;
 end;
 
 procedure TGLFlowForm.BUSelectClick(Sender: TObject);
@@ -270,7 +255,7 @@ begin
       TBackgroundLoader(FLoader).Abort;
       DCPics.DeleteChildren;
       GLMaterialLibrary.Materials.Clear;
-      LoadFolder(ExtractFilePath(OpenDialog1.FileName));
+      LoadFolder( ExtractFilePath(OpenDialog1.FileName) );
    end;
 end;
 
@@ -281,20 +266,20 @@ var
    obj : TGLBaseSceneObject;
 begin
    for i:=0 to DCPics.Count-1 do begin
-      delta:=i-FPosition;
       obj:=DCPics.Children[i];
-      obj.TurnAngle:=-65*ClampValue(delta, -1, 1);
-      obj.Position.X:=Sqrt(Abs(delta))*Sign(delta);
-      obj.Position.Z:=8/(Sqr(obj.position.X)+1)-6;
+      delta:=i-FPosition;
+      obj.TurnAngle  := -65 * ClampValue(delta, -1, 1);
+      obj.Position.X := Sqrt(Abs(delta)) * Sign(delta);
+      obj.Position.Z := 8/(Sqr(obj.position.X)+1) - 6;
    end;
 end;
 
 procedure TGLFlowForm.GLCadencer1Progress(Sender: TObject; const deltaTime,
   newTime: Double);
 begin
-   if Abs(FPosition-FTargetPosition)>1e-5 then begin
-      FPosition:=Lerp(FPosition, FTargetPosition,
-                      ClampValue(0.3/Abs(FTargetPosition-FPosition), 0.02, 0.5));
+   if Abs(FPosition-TrackBar.Position) > 1e-5 then begin
+      FPosition:=Lerp(FPosition, TrackBar.Position,
+                      ClampValue(0.3/Abs(TrackBar.Position-FPosition), 0.1, 0.5));
       UpdateCoversPositions;
       GLSceneViewer.Repaint;
    end;
@@ -308,11 +293,6 @@ begin
    pick:=GLSceneViewer.Buffer.GetPickedObject(x, y);
    if pick<>nil then
       TrackBar.Position:=pick.Tag;
-end;
-
-procedure TGLFlowForm.TrackBarChange(Sender: TObject);
-begin
-   FTargetPosition:=TrackBar.Position;
 end;
 
 end.

@@ -30,6 +30,7 @@ object GLFlowForm: TGLFlowForm
     FieldOfView = 171.784912109375000000
     Align = alClient
     OnMouseDown = GLSceneViewerMouseDown
+    ExplicitTop = -3
   end
   object Panel1: TPanel
     AlignWithMargins = True
@@ -61,7 +62,6 @@ object GLFlowForm: TGLFlowForm
       TabStop = False
       ThumbLength = 15
       TickMarks = tmBoth
-      OnChange = TrackBarChange
     end
     object BUSelect: TButton
       AlignWithMargins = True
@@ -80,6 +80,7 @@ object GLFlowForm: TGLFlowForm
     end
   end
   object GLScene1: TGLScene
+    VisibilityCulling = vcObjectBased
     Left = 32
     Top = 32
     object DCPics: TGLDummyCube
@@ -99,8 +100,7 @@ object GLFlowForm: TGLFlowForm
   end
   object GLCadencer1: TGLCadencer
     Scene = GLScene1
-    MinDeltaTime = 0.016000000000000000
-    SleepLength = 15
+    SleepLength = 10
     OnProgress = GLCadencer1Progress
     Left = 32
     Top = 80
