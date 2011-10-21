@@ -6,10 +6,9 @@ uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
   GLCrossPlatform, GLMisc, GLScene, GLWin32Viewer, IOUtils, Types,
   JPeg, GLTexture, GLGraphics, VectorGeometry, GLUtils, GLCadencer,
-  GLMesh, GLColor, ComCtrls, GLObjects, ExtCtrls, StdCtrls, Dialogs;
+  GLMesh, GLColor, ComCtrls, GLObjects, Dialogs, StdCtrls, ExtCtrls;
 
 type
-
   TGLFlowForm = class(TForm)
     GLScene1: TGLScene;
     GLSceneViewer: TGLSceneViewer;
@@ -21,7 +20,6 @@ type
     TrackBar: TTrackBar;
     BUSelect: TButton;
     OpenDialog1: TOpenDialog;
-    procedure FormCreate(Sender: TObject);
     procedure GLSceneViewerMouseDown(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
     procedure GLCadencer1Progress(Sender: TObject; const deltaTime,
@@ -29,12 +27,9 @@ type
     procedure BUSelectClick(Sender: TObject);
     procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
   private
-    { Private declarations }
     FPosition : Single;
     FLoader : TThread;
     procedure LoadFolder(const folder : String);
-  public
-    { Public declarations }
     procedure UpdateCoversPositions;
   end;
 
@@ -51,7 +46,6 @@ const
 type
    TBackgroundLoader = class(TThread)
       FPics : TStringDynArray;
-      FCurrentIndex : Integer;
       FJPGImage : TJPEGImage;
       FBitmap : TBitmap;
       FDestination : TGLBaseSceneObject;
@@ -85,6 +79,7 @@ begin
 
    FJPGImage:=TJPEGImage.Create;
    FJPGImage.Performance:=jpBestSpeed;
+
    FBitmap:=TBitmap.Create;
    FBitmap.Canvas.Brush.Color:=clBlack;
    FBitmap.PixelFormat:=pf32bit;
@@ -92,11 +87,11 @@ end;
 
 destructor TBackgroundLoader.Destroy;
 begin
-   FJPGImage.Free;
-   FBitmap.Free;
-   // own event as we can't use OnTerminated reliably (bug in RTL)
+   // custom event as we can't use OnTerminated reliably (design issue in RTL)
    if Assigned(FOnTerminate) then
       FOnTerminate();
+   FJPGImage.Free;
+   FBitmap.Free;
    inherited;
 end;
 
@@ -109,12 +104,10 @@ end;
 
 function TBackgroundLoader.LoadNext : Boolean;
 begin
-   if FCurrentIndex>High(FPics) then
-      Exit(False);
+   if FDestination.Count>High(FPics) then Exit(False);
 
    // Load the JPEG image
-   FJPGImage.LoadFromFile(FPics[FCurrentIndex]);
-   Inc(FCurrentIndex);
+   FJPGImage.LoadFromFile(FPics[FDestination.Count]);
 
    FCurrentWidth:=FJPGImage.Width;
    FCurrentHeight:=FJPGImage.Height;
@@ -170,7 +163,7 @@ begin
 
    // prepare material
    material:=FMaterialLibrary.Materials.Add;
-   material.Name:=IntToStr(FCurrentIndex);
+   material.Name:=IntToStr(FDestination.Count);
    material.TextureScale.X:=(FCurrentWidth+2)/FBitmap.Width;
    material.TextureScale.Y:=(FCurrentHeight+2)/FBitmap.Height;
 
@@ -201,28 +194,18 @@ begin
    mesh.Vertices.AddVertex(AffineVectorMake( 0.5, -0.6 , 0), ZVector, clrTransparent, TexPointMake(1, 0.66));
    mesh.Material.MaterialLibrary:=FMaterialLibrary;
    mesh.Material.LibMaterialName:=material.Name;
-   mesh.Tag:=FCurrentIndex-1;
+   mesh.Tag:=FDestination.Count-1;
 
    if Assigned(FOnAfterAddMesh) then
       FOnAfterAddMesh();
 end;
 
-// Abort
-//
 procedure TBackgroundLoader.Abort;
 begin
    if Self=nil then Exit;
    Terminate;
    WaitFor;
    Free;
-end;
-
-procedure TGLFlowForm.FormCreate(Sender: TObject);
-begin
-   // default to samples FPics from the FireMonkey sample
-   LoadFolder('C:\Users\Public\Documents\RAD Studio\9.0\Samples\FireMonkey\FireFlow\Demo Photos\');
-   // go for 60 FPS
-   GLCadencer1.FixedDeltaTime:=1/60;
 end;
 
 procedure TGLFlowForm.FormCloseQuery(Sender: TObject; var CanClose: Boolean);

@@ -12,7 +12,6 @@ object GLFlowForm: TGLFlowForm
   Font.Style = []
   OldCreateOrder = False
   OnCloseQuery = FormCloseQuery
-  OnCreate = FormCreate
   PixelsPerInch = 96
   TextHeight = 14
   object GLSceneViewer: TGLSceneViewer
@@ -30,7 +29,6 @@ object GLFlowForm: TGLFlowForm
     FieldOfView = 171.784912109375000000
     Align = alClient
     OnMouseDown = GLSceneViewerMouseDown
-    ExplicitTop = -3
   end
   object Panel1: TPanel
     AlignWithMargins = True
@@ -100,6 +98,7 @@ object GLFlowForm: TGLFlowForm
   end
   object GLCadencer1: TGLCadencer
     Scene = GLScene1
+    FixedDeltaTime = 0.015000000000000000
     SleepLength = 10
     OnProgress = GLCadencer1Progress
     Left = 32
