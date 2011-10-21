@@ -113,7 +113,7 @@ begin
    FCurrentHeight:=FJPGImage.Height;
 
    // Use built-in JPEG ability to downsize large bitmaps to what we need
-   case MinInteger(FCurrentWidth div cTargetSize, FCurrentHeight div cTargetSize) of
+   case MaxInteger(FCurrentWidth div cTargetSize, FCurrentHeight div cTargetSize) of
       0..1 :
          FJPGImage.Scale:=jsFullSize;
       2..3 : begin
@@ -195,6 +195,7 @@ begin
    mesh.Material.MaterialLibrary:=FMaterialLibrary;
    mesh.Material.LibMaterialName:=material.Name;
    mesh.Tag:=FDestination.Count-1;
+   mesh.Scale.X:=(FCurrentWidth/FCurrentHeight)/(3/2); // adjust aspect ratio from 3:2
 
    if Assigned(FOnAfterAddMesh) then
       FOnAfterAddMesh();
